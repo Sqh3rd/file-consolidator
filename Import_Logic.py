@@ -1,30 +1,34 @@
 import os
+from Local_String_Utils import Local_String_Utils
 
 class Import_Logic:
+    def __init__(self):
+        self.lsu = Local_String_Utils()
+
     def read_imports_from_file(self, file_name:str) -> list[str, list[str], list[str]]:
         imports = []
         file = ""
         imp = []
         rename = []
-        with open(f"{file_name}.py") as f:
+        with open(f"{file_name}") as f:
             for line in f:
                 if line.startswith("import"):
-                    imp = [line.split(' ')[1].split('.')[-2].strip()]
-                    file = f"{file_name.split('/')[:-2]}/{imports[-1].split('.')[-2]}.py"
-                    rename = line.split('as')[1].strip() if 'as' in line else imp
+                    temp_imp = line.split(' ')[1].split('.')[-2].strip()
+                    file = f"{file_name.split('/')[:-2]}/{'/'.join(line.split(' ')[1].split('.')[:-2])}.py"
+                    rename = line.split('as')[1].strip() if 'as' in line else temp_imp
                     imports.append((file, imp, rename))
                 elif line.startswith("from"):
                     file = line.split(' ')[1].strip()
-                    imp = line.split('import')[1].strip()
-                    if 'as' in imp:
-                        rename = imp.split('as')[1]
+                    temp_imp = line.split('import')[1].strip()
+                    if 'as' in temp_imp:
+                        rename = temp_imp.split('as')[1]
                         if ',' in rename:
                             rename = rename.split(',')
-                        imp = imp.split('as')[0]
-                        if ',' in imp:
-                            imp = imp.split(',')
+                        temp_imp = temp_imp.split('as')[0]
+                    if ',' in temp_imp:
+                        imp = temp_imp.split(',')
                     l_rename = len(rename)
-                    for i in range(l_rename < len(imp)):
+                    for i in range(len(imp) - l_rename):
                         rename.append(imp[l_rename + i])
                     for i in range(len(imp)):
                         imp[i] = imp[i].strip()
@@ -32,15 +36,13 @@ class Import_Logic:
                     imports.append((file, imp, rename))
                 elif line and not line.strip().startswith('#'):
                     return imports
+        return imports
 
     def read_imported_funcs_from_file(self, imports) -> list[str]:
         for imp in imports:
             file = imp[0]
             objs = imp[1]
             renames = imp[2]
-
-            depth = 0
-            obj_is_found = False
             temp_lines = []
             if not os.path.exists(file):
                 import_target = file.split('/')[-1].replace('.py', '')
@@ -73,20 +75,26 @@ class Import_Logic:
             function_or_class.append('\n')
         return function_or_class
 
-    def get_constant(self, lines, name) -> list[str]:
+    def get_constant(self, lines: list[str], name: str) -> list[str]:
         constant_is_found = False
         constant = []
-        is_parenthesis_in_constant = False
+        is_closed = False
+        opening_and_closing_sum = 0
+        start_and_end_sum = 0
         for line in lines:
             if not constant_is_found and name in line and '=' in line:
                 constant_is_found = True
-                if ['(', '[', '{', '\'\'\'', '\"\"\"'] in line:
-                    is_parenthesis_in_constant = True
             if constant_is_found:
                 constant.append(line)
-                if is_parenthesis_in_constant:
-                    if [')', ']', '}'] in line:
-                        is_parenthesis_in_constant = False
-                        return
+                temp_multiline, temp_opening_and_closing = self.lsu.keep_track_of_openings_and_closings(line)
+                if not is_closed:
+                    start_and_end_sum += sum([i % 2] for i in temp_multiline)
+                    opening_and_closing_sum += sum([i[0] - i[1]] for e in temp_opening_and_closing for i in temp_opening_and_closing[e])
+                    is_closed = start_and_end_sum == 0 and opening_and_closing_sum == 0
+                constant_is_found = not is_closed
+            if not constant_is_found and is_closed:
+                if line.startswith('.'):
+                    constant.append(line)
                 else:
-                    return
+                    break
+        return constant
