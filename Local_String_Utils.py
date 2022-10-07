@@ -8,7 +8,13 @@ class Local_String_Utils:
         self.CORRESPONDING_CLOSING_CHARACTERS = {self.OPENING_CHARACTERS[i]: self.CLOSING_CHARACTERS[i] for i in range(len(self.OPENING_CHARACTERS))}
         self.MULTILINE_CHARACTERS = ["\'\'\'", "\"\"\""]
     
-    def keep_track_of_openings_and_closings(self, line) -> tuple[dict[str, int], dict[tuple[str, str], tuple[int, int]]]:
+    def is_variable_assignment_closed(self, line: str) -> bool:
+        _conditions = []
+        _temp_tuple = self._keep_track_of_openings_and_closings(line)
+        _conditions.extend([True if x % 2 == 0 else False for t in _temp_tuple for y in t for x in t[y]])
+        return all(_conditions)
+
+    def _keep_track_of_openings_and_closings(self, line: str) -> tuple[dict[str, int], dict[tuple[str, str], tuple[int, int]]]:
         multiline_tracking_dict = {}
         opening_and_closing_tracking_dict = {(op, self.CORRESPONDING_CLOSING_CHARACTERS[op]):(0,0) for op in self.OPENING_CHARACTERS}
         if '=' in line:

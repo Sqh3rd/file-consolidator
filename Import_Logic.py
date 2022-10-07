@@ -1,100 +1,118 @@
 import os
+from Import_Object import Import_Object
+from Logger import Logger
 from Local_String_Utils import Local_String_Utils
+from Import_Object_Factory import Import_Object_Factory
 
 class Import_Logic:
-    def __init__(self):
-        self.lsu = Local_String_Utils()
+    def __init__(self, logger: Logger):
+        self.lsu: Local_String_Utils = Local_String_Utils()
+        self.import_object_factory: Import_Object_Factory = Import_Object_Factory()
+        self.LOGGER: Logger = logger
+        self._cache: dict = {}
+        self._external_imports = {}
 
-    def read_imports_from_file(self, file_name:str) -> list[str, list[str], list[str]]:
-        imports = []
-        file = ""
-        imp = []
-        rename = []
-        with open(f"{file_name}") as f:
-            for line in f:
-                if line.startswith("import"):
-                    temp_imp = line.split(' ')[1].split('.')[-2].strip()
-                    file = f"{file_name.split('/')[:-2]}/{'/'.join(line.split(' ')[1].split('.')[:-2])}.py"
-                    rename = line.split('as')[1].strip() if 'as' in line else temp_imp
-                    imports.append((file, imp, rename))
-                elif line.startswith("from"):
-                    file = line.split(' ')[1].strip()
-                    temp_imp = line.split('import')[1].strip()
-                    if 'as' in temp_imp:
-                        rename = temp_imp.split('as')[1]
-                        if ',' in rename:
-                            rename = rename.split(',')
-                        temp_imp = temp_imp.split('as')[0]
-                    if ',' in temp_imp:
-                        imp = temp_imp.split(',')
-                    l_rename = len(rename)
-                    for i in range(len(imp) - l_rename):
-                        rename.append(imp[l_rename + i])
-                    for i in range(len(imp)):
-                        imp[i] = imp[i].strip()
-                        rename[i] = rename[i].strip()
-                    imports.append((file, imp, rename))
-                elif line and not line.strip().startswith('#'):
-                    return imports
-        return imports
+    def get_and_cache_imports(self, in_file_name: str, out_file_name: str) -> None:
+        self._cache_imports(in_file_name)
+        self._improve_cache()
+        self._get_and_write_imports(in_file_name, out_file_name)
 
-    def read_imported_funcs_from_file(self, imports) -> list[str]:
-        for imp in imports:
-            file = imp[0]
-            objs = imp[1]
-            renames = imp[2]
-            temp_lines = []
-            if not os.path.exists(file):
-                import_target = file.split('/')[-1].replace('.py', '')
-                import_string = f"from {import_target} import {', '.join(objs)} as {', '.join(renames)}"
-                return import_string
-            with open(file, "r") as f:
-                for obj in objs:
-                    if obj.isupper():
-                        temp_lines.append(self.get_constant(f.readlines(), obj))
-                    else:
-                        temp_lines.append(self.get_function_or_class(f.readlines(), obj))
-            return temp_lines
-
-    def get_function_or_class(self, lines, name) -> list[str]:
-        depth = 0
-        function_or_class_is_found = False
-        function_or_class = []
-        for line in lines:
-            if not function_or_class_is_found and ('def' in line or 'class' in line) and name in line:
-                depth = len(line) - len(line.lstrip())
-                function_or_class.append(line)
-            if function_or_class_is_found:
-                if len(line) - len(line.lstrip()) < depth:
-                    if len(function_or_class) > 0:
-                        function_or_class.append('\n')
-                    return function_or_class
-                if line:
-                    function_or_class.append(line)
-        if len(function_or_class) > 0:
-            function_or_class.append('\n')
-        return function_or_class
-
-    def get_constant(self, lines: list[str], name: str) -> list[str]:
-        constant_is_found = False
-        constant = []
-        is_closed = False
-        opening_and_closing_sum = 0
-        start_and_end_sum = 0
-        for line in lines:
-            if not constant_is_found and name in line and '=' in line:
-                constant_is_found = True
-            if constant_is_found:
-                constant.append(line)
-                temp_multiline, temp_opening_and_closing = self.lsu.keep_track_of_openings_and_closings(line)
-                if not is_closed:
-                    start_and_end_sum += sum([i % 2] for i in temp_multiline)
-                    opening_and_closing_sum += sum([i[0] - i[1]] for e in temp_opening_and_closing for i in temp_opening_and_closing[e])
-                    is_closed = start_and_end_sum == 0 and opening_and_closing_sum == 0
-                constant_is_found = not is_closed
-            if not constant_is_found and is_closed:
-                if line.startswith('.'):
-                    constant.append(line)
+    def _cache_imports(self, in_file_name: str) -> None:
+        imp_obj: Import_Object = self.import_object_factory.create_import_object(self.LOGGER, in_file_name)
+        for file in imp_obj.imports:
+            if file in self._cache:
+                self._cache[file].extend(imp_obj.imports[file])
+                self._cache[file] = list(set(self._cache[file]))
+            else:
+                self._cache[file] = list(set(imp_obj.imports[file]))
+            self._cache_imports(file)
+        for external_imp in imp_obj.external_imports:
+            if external_imp in self._external_imports:
+                self._external_imports[external_imp].extend(imp_obj.external_imports[external_imp])
+                self._external_imports[external_imp] = list(set(self._external_imports[external_imp]))
+            else:
+                self._external_imports[external_imp] = list(set(imp_obj.external_imports[external_imp]))
+    
+    def _improve_cache(self) -> None:
+        for file in self._cache:
+            if any(["f*" == e[0] for e in self._cache[file]]):
+                self._cache[file] = [("f*", False)]
+            elif any(['*' == e[0] for e in self._cache[file]]):
+                self._cache[file] = [('*', False)]
+    
+    def _get_and_write_imports(self, in_file_name: str, out_file_name: str) -> None:
+        _temp_lines = self._get_everything_from_file(in_file_name)
+        if _temp_lines:
+            self._append_on_top_of_file(out_file_name, _temp_lines, f"----- {in_file_name} -----")
+        for file_name in self._cache:
+            for obj in self._cache[file_name]:
+                _temp_lines = []
+                if obj[0].isupper() and not '*' in obj[0]:
+                    _temp_lines = self._get_constant(file_name, obj[0])
+                elif not '*' in obj[0]:
+                    _temp_lines = self._get_function_or_class(file_name, obj[1])
                 else:
-                    break
-        return constant
+                    _temp_lines = self._get_everything_from_file(file_name)
+                if _temp_lines:
+                    self._append_on_top_of_file(out_file_name, _temp_lines, f"----- {file_name} -----")
+        _temp_lines = []
+        for e in self._external_imports:
+            if "f*" == self._external_imports[e][0]:
+                _temp_lines.append(f"from {e} import *")
+            elif '*' == self._external_imports[e][0]:
+                _temp_lines.append(f"import {e}")
+            else:
+                _temp_lines.append(f"from {e} import {','.join([e_i[0] for e_i in self._external_imports[e]])}")
+        if not _temp_lines:
+            return
+        if _temp_lines:
+            self._append_on_top_of_file(out_file_name, _temp_lines, "----- General Imports -----")
+
+    def _get_constant(self, file_name: str, name: str) -> list[str]:
+        _temp_lines = []
+        with open(file_name, 'r') as f:
+            _constant_is_closed = False
+            for line in f:
+                if name in line and '=' in line:
+                    _temp_lines.append(line)
+                    if self.lsu.is_variable_assignment_closed(line):
+                        _constant_is_closed = True
+                elif _constant_is_closed:
+                    if line.startswith('.'):
+                        _temp_lines.append(line)
+                    elif line:
+                        break
+        return _temp_lines
+
+    def _get_function_or_class(self, file_name: str, name: str) -> list[str]:
+        _temp_lines = []
+        with open(file_name, 'r') as f:
+            _function_is_found = False
+            depth = 0
+            for line in f:
+                if ("def" in line or "class" in line) and name in line and not _function_is_found:
+                    depth = len(line) - len(line.lstrip())
+                    _function_is_found = True
+                if _function_is_found:
+                    if len(line) - len(line.lstrip()) <= depth:
+                        break
+                    _temp_lines.append(line)
+        return _temp_lines
+
+    def _get_everything_from_file(self, file_name: str) -> list[str]:
+        _temp_lines = []
+        with open(file_name, 'r') as f:
+            _temp_lines = f.readlines()
+        _temp_lines = list(filter(lambda x: not(x.startswith("import") or x.startswith("from")), _temp_lines))
+        return _temp_lines
+
+    def _append_on_top_of_file(self, file_name: str, text_to_append: str, section_title: str):
+        _old_lines = []
+        with open(file_name, 'r') as f_r:
+            _old_lines = f_r.readlines()
+        with open(file_name, 'w') as f_w:
+            f_w.write(f"# {section_title}\n")
+            f_w.writelines(text_to_append)
+            if _old_lines:
+                f_w.write("\n\n")
+                f_w.writelines(_old_lines)
