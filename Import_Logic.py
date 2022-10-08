@@ -25,6 +25,7 @@ class Import_Logic:
                 self._cache[file] = list(set(self._cache[file]))
             else:
                 self._cache[file] = list(set(imp_obj.imports[file]))
+            self.LOGGER.info(f"{imp_obj.imports[file]} from {file} added to Cache.")
             self._cache_imports(file)
         for external_imp in imp_obj.external_imports:
             if external_imp in self._external_imports:
@@ -32,13 +33,16 @@ class Import_Logic:
                 self._external_imports[external_imp] = list(set(self._external_imports[external_imp]))
             else:
                 self._external_imports[external_imp] = list(set(imp_obj.external_imports[external_imp]))
+            self.LOGGER.info(f"{external_imp} added to Cache.")
     
     def _improve_cache(self) -> None:
+        self.LOGGER.info(f"Started Cache improvement")
         for file in self._cache:
             if any(["f*" == e[0] for e in self._cache[file]]):
                 self._cache[file] = [("f*", False)]
             elif any(['*' == e[0] for e in self._cache[file]]):
                 self._cache[file] = [('*', False)]
+        self.LOGGER.info(f"Cache improvement successful")
     
     def _get_and_write_imports(self, in_file_name: str, out_file_name: str) -> None:
         _temp_lines = self._get_everything_from_file(in_file_name)
@@ -50,16 +54,17 @@ class Import_Logic:
                 if obj[0].isupper() and not '*' in obj[0]:
                     _temp_lines = self._get_constant(file_name, obj[0])
                 elif not '*' in obj[0]:
-                    _temp_lines = self._get_function_or_class(file_name, obj[1])
+                    _temp_lines = self._get_function_or_class(file_name, obj[0])
                 else:
                     _temp_lines = self._get_everything_from_file(file_name)
                 if _temp_lines:
                     self._append_on_top_of_file(out_file_name, _temp_lines, f"----- {file_name} -----")
+            self.LOGGER.info(f"Started Cache improvement")
         _temp_lines = []
         for e in self._external_imports:
-            if "f*" == self._external_imports[e][0]:
+            if "f*" in self._external_imports[e][0]:
                 _temp_lines.append(f"from {e} import *")
-            elif '*' == self._external_imports[e][0]:
+            elif '*' in self._external_imports[e][0]:
                 _temp_lines.append(f"import {e}")
             else:
                 _temp_lines.append(f"from {e} import {','.join([e_i[0] for e_i in self._external_imports[e]])}")
@@ -90,20 +95,22 @@ class Import_Logic:
             _function_is_found = False
             depth = 0
             for line in f:
-                if ("def" in line or "class" in line) and name in line and not _function_is_found:
+                if (("def" in line) or ("class" in line)) and name in line and not _function_is_found:
                     depth = len(line) - len(line.lstrip())
                     _function_is_found = True
-                if _function_is_found:
+                    _temp_lines.append(line)
+                elif _function_is_found:
                     if len(line) - len(line.lstrip()) <= depth:
                         break
-                    _temp_lines.append(line)
+                    if line.strip():
+                        _temp_lines.append(line)
         return _temp_lines
 
     def _get_everything_from_file(self, file_name: str) -> list[str]:
         _temp_lines = []
         with open(file_name, 'r') as f:
             _temp_lines = f.readlines()
-        _temp_lines = list(filter(lambda x: not(x.startswith("import") or x.startswith("from")), _temp_lines))
+        _temp_lines = list(filter(lambda x: not(x.startswith("import") or x.startswith("from")) and x.strip(), _temp_lines))
         return _temp_lines
 
     def _append_on_top_of_file(self, file_name: str, text_to_append: str, section_title: str):
