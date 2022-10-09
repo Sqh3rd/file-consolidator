@@ -15,7 +15,7 @@ class Import_Object:
         with open(file_name, 'r') as f:
             for line in f:
                 if "import" in line and not '#' in line:
-                    if "as" in line:
+                    if " as " in line:
                         error_obj = Error_Object("Renaming of imported classes is not allowed!", SyntaxError)
                         self.LOGGER.error(error_obj)
                     if self._get_external_imports(line):
@@ -69,7 +69,6 @@ class Import_Object:
     
     def _get_objects_from_import(self, import_str: str) -> list[str]:
         imports = []
-        import_str = import_str if not "as" in import_str else import_str.split("as")[0]
         if import_str.startswith("import"):
             temp = import_str.split("import")[1]
             imports = ['*'] * (temp.count(',') + 1)
@@ -82,7 +81,13 @@ class Import_Object:
                 else:
                     imports = temp.split(',')
             else:
-                imports = ["f*" for i in range(temp.count(',') + 1)]
+                if ',' in temp:
+                    imports = [t.strip() for t in temp.split(',')]
+                else:
+                    imports = [temp.strip()]
+                for i in range(len(imports)):
+                    if imports[i] == '*':
+                        imports[i] = "f*"
         imports = [x.strip() for x in imports]
         return imports
 
