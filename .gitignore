@@ -153,3 +153,4 @@ cython_debug/
 
 # Test Program Folder
 test_program/
+.vscode
